@@ -8,6 +8,7 @@
   "scripts": {
     "backfill": "tsx scripts/backfill.ts",
     "label": "tsx scripts/label.ts",
+    "review-labels": "tsx scripts/review-labels.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
