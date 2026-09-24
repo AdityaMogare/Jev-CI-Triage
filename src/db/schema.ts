@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS failures (
   was_rerun INTEGER NOT NULL,
   rerun_passed INTEGER,
   failed_at TEXT,
+  true_label TEXT,
   UNIQUE (repo, job_id)
 );
 `;
@@ -55,6 +56,10 @@ export function openDatabase(dbPath: string): Database.Database {
   const db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
   db.exec(SCHEMA);
+  const columns = db.prepare("PRAGMA table_info(failures)").all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === "true_label")) {
+    db.exec("ALTER TABLE failures ADD COLUMN true_label TEXT");
+  }
   return db;
 }
 
@@ -90,4 +95,54 @@ export function hasFailure(db: Database.Database, repo: string, jobId: number): 
 export function countFailures(db: Database.Database): number {
   const row = db.prepare("SELECT COUNT(*) AS n FROM failures").get() as { n: number };
   return row.n;
+}
+
+export type TrueLabel = "flaky" | "infra" | "regression" | "unknown";
+
+export type LabelInput = {
+  id: number;
+  repo: string;
+  commitSha: string;
+  jobName: string;
+  testName: string | null;
+  errorMessage: string | null;
+  logExcerpt: string | null;
+  rerunPassed: boolean | null;
+  failedAt: string | null;
+};
+
+export function listLabelInputs(db: Database.Database): LabelInput[] {
+  const rows = db
+    .prepare(
+      `SELECT id, repo, commit_sha, job_name, test_name, error_message, log_excerpt,
+              rerun_passed, failed_at
+       FROM failures
+       ORDER BY id`,
+    )
+    .all() as Array<{
+      id: number;
+      repo: string;
+      commit_sha: string;
+      job_name: string;
+      test_name: string | null;
+      error_message: string | null;
+      log_excerpt: string | null;
+      rerun_passed: number | null;
+      failed_at: string | null;
+    }>;
+  return rows.map((row) => ({
+    id: row.id,
+    repo: row.repo,
+    commitSha: row.commit_sha,
+    jobName: row.job_name,
+    testName: row.test_name,
+    errorMessage: row.error_message,
+    logExcerpt: row.log_excerpt,
+    rerunPassed: row.rerun_passed === null ? null : row.rerun_passed === 1,
+    failedAt: row.failed_at,
+  }));
+}
+
+export function setTrueLabel(db: Database.Database, id: number, label: TrueLabel): void {
+  db.prepare("UPDATE failures SET true_label = ? WHERE id = ?").run(label, id);
 }
