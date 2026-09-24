@@ -56,6 +56,29 @@ describe("backfillFailures", () => {
     expect(countFailures(db)).toBe(2);
     expect(client.logDownloads).toBe(2);
   });
+
+  it("keeps an older passing re-run when newer failures would fill the cap", async () => {
+    const db = openDatabase(":memory:");
+    const client = new CrowdingClient();
+
+    const result = await backfillFailures(db, client, {
+      repo: "vitest-dev/vitest",
+      workflow: "CI",
+      since: "2026-06-01",
+      maxJobs: 4,
+    });
+
+    expect(result).toEqual({ inserted: 4, skipped: 0, seen: 4 });
+    const rows = db
+      .prepare("SELECT job_id, rerun_passed FROM failures ORDER BY job_id")
+      .all() as Array<{ job_id: number; rerun_passed: number | null }>;
+    expect(rows).toEqual([
+      { job_id: 2, rerun_passed: null },
+      { job_id: 3, rerun_passed: null },
+      { job_id: 4, rerun_passed: null },
+      { job_id: 10, rerun_passed: 1 },
+    ]);
+  });
 });
 
 class FakeClient implements ActionsClient {
@@ -128,6 +151,57 @@ class FakeClient implements ActionsClient {
   async getPullRequestNumber(): Promise<number | null> {
     return 42;
   }
+}
+
+class CrowdingClient implements ActionsClient {
+  async listRuns(params: { status: "failure" | "success" }): Promise<RunSummary[]> {
+    if (params.status === "success") {
+      return [run(1, 2, "2026-08-01T00:00:00Z")];
+    }
+    return [
+      run(104, 1, "2026-09-04T00:00:00Z"),
+      run(103, 1, "2026-09-03T00:00:00Z"),
+      run(102, 1, "2026-09-02T00:00:00Z"),
+      run(101, 1, "2026-09-01T00:00:00Z"),
+    ];
+  }
+
+  async listJobs(runId: number): Promise<JobSummary[]> {
+    if (runId === 1) {
+      return [
+        job(10, "unit", "failure", 1, "runner-a", "2026-08-01T00:00:00Z", "2026-08-01T00:01:00Z"),
+        job(11, "unit", "success", 2, "runner-a", "2026-08-01T00:02:00Z", "2026-08-01T00:03:00Z"),
+      ];
+    }
+    const plainId = runId - 100;
+    return [
+      job(plainId, "unit", "failure", 1, "runner-b", "2026-09-01T00:00:00Z", "2026-09-01T00:00:30Z"),
+    ];
+  }
+
+  async getJobLog(): Promise<string | null> {
+    return "FAIL test/plain.test.ts > fails";
+  }
+
+  async listArtifacts() {
+    return [];
+  }
+
+  async downloadArtifact(): Promise<Uint8Array | null> {
+    return null;
+  }
+
+  async getCommitFiles(): Promise<string[]> {
+    return ["src/world.ts"];
+  }
+
+  async getPullRequestNumber(): Promise<number | null> {
+    return null;
+  }
+}
+
+function run(id: number, runAttempt: number, createdAt: string): RunSummary {
+  return { id, name: "CI", headSha: `sha-${id}`, headBranch: "main", runAttempt, createdAt };
 }
 
 function job(

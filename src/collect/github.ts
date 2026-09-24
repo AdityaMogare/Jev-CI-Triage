@@ -187,34 +187,55 @@ export async function backfillFailures(
     since: options.since,
     workflow: options.workflow,
   });
-  const runs = [...failedRuns, ...successRuns.filter((run) => run.runAttempt > 1)];
-  runs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const byNewest = (a: RunSummary, b: RunSummary) => b.createdAt.localeCompare(a.createdAt);
+  const passingRerunRuns = successRuns.filter((run) => run.runAttempt > 1).sort(byNewest);
+  const plainRuns = failedRuns.sort(byNewest);
 
   const commitCache = new Map<string, { files: string[]; prNumber: number | null }>();
-  let inserted = 0;
-  let skipped = 0;
-  let seen = 0;
+  const totals = { inserted: 0, skipped: 0, seen: 0 };
+  const rerunBudget = Math.floor(options.maxJobs / 4);
 
+  await collectRuns(db, client, options, commitCache, totals, passingRerunRuns, rerunBudget, true);
+  const plainBudget = options.maxJobs - totals.seen;
+  await collectRuns(db, client, options, commitCache, totals, plainRuns, plainBudget, false);
+
+  return totals;
+}
+
+async function collectRuns(
+  db: Database,
+  client: ActionsClient,
+  options: BackfillOptions,
+  commitCache: Map<string, { files: string[]; prNumber: number | null }>,
+  totals: BackfillResult,
+  runs: RunSummary[],
+  limit: number,
+  requirePassedRerun: boolean,
+): Promise<void> {
+  let taken = 0;
   for (const run of runs) {
-    if (seen >= options.maxJobs) break;
+    if (taken >= limit) break;
     const jobs = await client.listJobs(run.id);
     const failedJobs = jobs
       .filter((job) => job.conclusion === "failure")
       .sort((a, b) => a.runAttempt - b.runAttempt || a.id - b.id);
 
     for (const job of failedJobs) {
-      if (seen >= options.maxJobs) break;
-      seen += 1;
-      if (hasFailure(db, options.repo, job.id)) {
-        skipped += 1;
-        continue;
-      }
-
+      if (taken >= limit) break;
       const later = jobs.filter(
         (other) => other.name === job.name && other.runAttempt > job.runAttempt,
       );
       const wasRerun = later.length > 0;
       const rerunPassed = wasRerun ? later.some((other) => other.conclusion === "success") : null;
+      if (requirePassedRerun && rerunPassed !== true) continue;
+
+      taken += 1;
+      totals.seen += 1;
+      if (hasFailure(db, options.repo, job.id)) {
+        totals.skipped += 1;
+        continue;
+      }
+
       const commit = await loadCommit(client, commitCache, run.headSha);
       const log = await client.getJobLog(job.id);
       const excerpt = log ? extractLogExcerpt(log) : null;
@@ -241,16 +262,16 @@ export async function backfillFailures(
         failedAt: job.completedAt,
       };
 
-      if (insertFailure(db, row)) inserted += 1;
-      else skipped += 1;
+      if (insertFailure(db, row)) totals.inserted += 1;
+      else totals.skipped += 1;
 
-      if (seen % 25 === 0) {
-        options.onProgress?.(`Processed ${seen} failed jobs (${inserted} inserted, ${skipped} skipped)`);
+      if (totals.seen % 25 === 0) {
+        options.onProgress?.(
+          `Processed ${totals.seen} failed jobs (${totals.inserted} inserted, ${totals.skipped} skipped)`,
+        );
       }
     }
   }
-
-  return { inserted, skipped, seen };
 }
 
 async function loadCommit(
