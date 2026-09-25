@@ -9,11 +9,13 @@
     "backfill": "tsx scripts/backfill.ts",
     "label": "tsx scripts/label.ts",
     "review-labels": "tsx scripts/review-labels.ts",
+    "classify": "tsx scripts/classify.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@octokit/rest": "^22.0.0",
+    "@typesafe-ai/sdk": "^0.6.0",
     "better-sqlite3": "^12.2.0",
     "dotenv": "^17.2.1",
     "fflate": "^0.8.2"

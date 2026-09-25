@@ -60,6 +60,20 @@ export function openDatabase(dbPath: string): Database.Database {
   if (!columns.some((column) => column.name === "true_label")) {
     db.exec("ALTER TABLE failures ADD COLUMN true_label TEXT");
   }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS jev_calls (
+      id INTEGER PRIMARY KEY,
+      failure_id INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      input_chars INTEGER NOT NULL,
+      input_tokens INTEGER,
+      cost_usd REAL,
+      duration_ms INTEGER NOT NULL,
+      model TEXT,
+      category TEXT NOT NULL,
+      confidence REAL NOT NULL
+    );
+  `);
   return db;
 }
 
@@ -145,4 +159,91 @@ export function listLabelInputs(db: Database.Database): LabelInput[] {
 
 export function setTrueLabel(db: Database.Database, id: number, label: TrueLabel): void {
   db.prepare("UPDATE failures SET true_label = ? WHERE id = ?").run(label, id);
+}
+
+export type StoredFailure = FailureRow & { id: number };
+
+export function getFailure(db: Database.Database, id: number): StoredFailure | null {
+  const row = db
+    .prepare(
+      `SELECT id, repo, commit_sha, pr_number, branch, workflow_name, run_id, run_attempt,
+              job_id, job_name, test_name, error_message, log_excerpt, changed_files,
+              runner_name, duration_seconds, was_rerun, rerun_passed, failed_at
+       FROM failures WHERE id = ?`,
+    )
+    .get(id) as
+    | {
+        id: number;
+        repo: string;
+        commit_sha: string;
+        pr_number: number | null;
+        branch: string | null;
+        workflow_name: string;
+        run_id: number;
+        run_attempt: number;
+        job_id: number;
+        job_name: string;
+        test_name: string | null;
+        error_message: string | null;
+        log_excerpt: string | null;
+        changed_files: string;
+        runner_name: string | null;
+        duration_seconds: number | null;
+        was_rerun: number;
+        rerun_passed: number | null;
+        failed_at: string | null;
+      }
+    | undefined;
+  if (!row) return null;
+  return {
+    id: row.id,
+    repo: row.repo,
+    commitSha: row.commit_sha,
+    prNumber: row.pr_number,
+    branch: row.branch,
+    workflowName: row.workflow_name,
+    runId: row.run_id,
+    runAttempt: row.run_attempt,
+    jobId: row.job_id,
+    jobName: row.job_name,
+    testName: row.test_name,
+    errorMessage: row.error_message,
+    logExcerpt: row.log_excerpt,
+    changedFiles: JSON.parse(row.changed_files) as string[],
+    runnerName: row.runner_name,
+    durationSeconds: row.duration_seconds,
+    wasRerun: row.was_rerun === 1,
+    rerunPassed: row.rerun_passed === null ? null : row.rerun_passed === 1,
+    failedAt: row.failed_at,
+  };
+}
+
+export type JevCallRow = {
+  failureId: number;
+  inputChars: number;
+  inputTokens: number | null;
+  costUsd: number | null;
+  durationMs: number;
+  model: string | null;
+  category: string;
+  confidence: number;
+};
+
+export function insertJevCall(db: Database.Database, row: JevCallRow): void {
+  db.prepare(
+    `INSERT INTO jev_calls (
+      failure_id, created_at, input_chars, input_tokens, cost_usd,
+      duration_ms, model, category, confidence
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    row.failureId,
+    new Date().toISOString(),
+    row.inputChars,
+    row.inputTokens,
+    row.costUsd,
+    row.durationMs,
+    row.model,
+    row.category,
+    row.confidence,
+  );
 }
