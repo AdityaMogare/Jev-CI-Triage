@@ -73,6 +73,29 @@ export function openDatabase(dbPath: string): Database.Database {
       category TEXT NOT NULL,
       confidence REAL NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS decisions (
+      id INTEGER PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      failure_id INTEGER NOT NULL,
+      category TEXT NOT NULL,
+      confidence REAL NOT NULL,
+      culprit_file TEXT,
+      action TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      dry_run INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS feedback (
+      id INTEGER PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      decision_id INTEGER NOT NULL,
+      helpful INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS human_actions (
+      id INTEGER PRIMARY KEY,
+      failure_id INTEGER NOT NULL,
+      acted_at TEXT NOT NULL,
+      kind TEXT NOT NULL
+    );
   `);
   return db;
 }

@@ -11,6 +11,8 @@
     "review-labels": "tsx scripts/review-labels.ts",
     "classify": "tsx scripts/classify.ts",
     "evaluate": "tsx scripts/evaluate.ts",
+    "weekly-report": "tsx scripts/weekly-report.ts",
+    "app": "probot run ./src/app/probot.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
@@ -19,7 +21,8 @@
     "@typesafe-ai/sdk": "^0.6.0",
     "better-sqlite3": "^12.2.0",
     "dotenv": "^17.2.1",
-    "fflate": "^0.8.2"
+    "fflate": "^0.8.2",
+    "probot": "^14.3.2"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
